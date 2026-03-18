@@ -81,7 +81,7 @@ is_lingma_running() {
   local platform="$1"
   case "$platform" in
     macos)
-      pgrep -if 'Lingma' >/dev/null 2>&1
+      pgrep -x 'Lingma' >/dev/null 2>&1
       ;;
     windows)
       tasklist.exe 2>/dev/null | grep -iq 'Lingma\.exe'

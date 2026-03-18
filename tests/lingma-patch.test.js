@@ -30,8 +30,17 @@ function parseTrailingJson(output) {
 }
 
 function runScript(args, expectedExitCode = 0) {
+  return runScriptWithOptions(args, { expectedExitCode });
+}
+
+function runScriptWithOptions(args, options = {}) {
+  const { expectedExitCode = 0, env = {} } = options;
   const result = spawnSync('bash', [SCRIPT_PATH, ...args], {
     encoding: 'utf8',
+    env: {
+      ...process.env,
+      ...env,
+    },
   });
 
   if (result.status !== expectedExitCode) {
@@ -53,6 +62,20 @@ function createFixture() {
     backupFile: `${targetFile}${BACKUP_SUFFIX}`,
     metaFile: `${targetFile}${META_SUFFIX}`,
   };
+}
+
+function writeExecutable(filePath, content) {
+  fs.writeFileSync(filePath, content, { mode: 0o755 });
+}
+
+function createFakeMacosBin(pgrepScriptBody) {
+  const fakeBinDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lingma-patch-bin-'));
+  writeExecutable(
+    path.join(fakeBinDir, 'uname'),
+    ['#!/usr/bin/env bash', 'printf "Darwin\\n"'].join('\n')
+  );
+  writeExecutable(path.join(fakeBinDir, 'pgrep'), pgrepScriptBody);
+  return fakeBinDir;
 }
 
 function listArchivedFiles(file) {
@@ -129,10 +152,36 @@ function testDriftedRotation() {
   assert.ok(listArchivedFiles(fixture.metaFile).length >= 1, 'expected archived meta after drift');
 }
 
+function testInstallIgnoresMacosHelperProcesses() {
+  const fixture = createFixture();
+  fs.writeFileSync(fixture.targetFile, buildBundle('v1'));
+
+  const fakeBinDir = createFakeMacosBin([
+    '#!/usr/bin/env bash',
+    'if [[ "$1" == "-if" && "$2" == "Lingma" ]]; then',
+    '  exit 0',
+    'fi',
+    'if [[ "$1" == "-x" && "$2" == "Lingma" ]]; then',
+    '  exit 1',
+    'fi',
+    'exit 1',
+  ].join('\n'));
+
+  const result = runScriptWithOptions(['install', '--file', fixture.targetFile], {
+    env: {
+      PATH: `${fakeBinDir}:${process.env.PATH}`,
+    },
+  });
+  const currentStatus = parseTrailingJson(result.stdout);
+
+  assert.strictEqual(currentStatus.state, 'patched-current');
+}
+
 const tests = [
   ['status returns patched-current after a normal install', testPatchedCurrentState],
   ['install rotates stale active backup metadata when target is already patched', testPatchedStaleRotation],
   ['install rotates drifted active backup metadata after the bundle changes', testDriftedRotation],
+  ['install ignores macOS helper process matches when Lingma main process is not running', testInstallIgnoresMacosHelperProcesses],
 ];
 
 let failures = 0;
