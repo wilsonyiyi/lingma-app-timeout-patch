@@ -22,30 +22,30 @@
 
 先关闭 Lingma。
 
-把下面的 `<GITHUB_USER>` 换成你的 GitHub 用户名或组织名。
+这里的 GitHub 用户名固定使用 `wilsonyiyi`。
 
 脚本 raw 地址示例：
 
 ```text
-https://raw.githubusercontent.com/<GITHUB_USER>/lingma-app-timeout-patch/main/lingma-patch.sh
+https://raw.githubusercontent.com/wilsonyiyi/lingma-app-timeout-patch/main/lingma-patch.sh
 ```
 
 ### macOS
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<GITHUB_USER>/lingma-app-timeout-patch/main/lingma-patch.sh | bash
+curl -fsSL https://raw.githubusercontent.com/wilsonyiyi/lingma-app-timeout-patch/main/lingma-patch.sh | bash
 ```
 
 ### Windows + Git Bash
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<GITHUB_USER>/lingma-app-timeout-patch/main/lingma-patch.sh | bash
+curl -fsSL https://raw.githubusercontent.com/wilsonyiyi/lingma-app-timeout-patch/main/lingma-patch.sh | bash
 ```
 
 如果你的 Lingma 不在默认安装位置，手动指定 bundle：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<GITHUB_USER>/lingma-app-timeout-patch/main/lingma-patch.sh | bash -s -- --file "/custom/path/to/workbench.desktop.main.js"
+curl -fsSL https://raw.githubusercontent.com/wilsonyiyi/lingma-app-timeout-patch/main/lingma-patch.sh | bash -s -- --file "/custom/path/to/workbench.desktop.main.js"
 ```
 
 ## 常用命令
@@ -53,13 +53,13 @@ curl -fsSL https://raw.githubusercontent.com/<GITHUB_USER>/lingma-app-timeout-pa
 查看状态：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<GITHUB_USER>/lingma-app-timeout-patch/main/lingma-patch.sh | bash -s -- status
+curl -fsSL https://raw.githubusercontent.com/wilsonyiyi/lingma-app-timeout-patch/main/lingma-patch.sh | bash -s -- status
 ```
 
 回滚补丁：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<GITHUB_USER>/lingma-app-timeout-patch/main/lingma-patch.sh | bash -s -- restore
+curl -fsSL https://raw.githubusercontent.com/wilsonyiyi/lingma-app-timeout-patch/main/lingma-patch.sh | bash -s -- restore
 ```
 
 查看当前状态字段：
@@ -72,7 +72,7 @@ curl -fsSL https://raw.githubusercontent.com/<GITHUB_USER>/lingma-app-timeout-pa
 Lingma 正在运行但你明确要继续时：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<GITHUB_USER>/lingma-app-timeout-patch/main/lingma-patch.sh | bash -s -- --force
+curl -fsSL https://raw.githubusercontent.com/wilsonyiyi/lingma-app-timeout-patch/main/lingma-patch.sh | bash -s -- --force
 ```
 
 ## 给同事分发
@@ -80,7 +80,7 @@ curl -fsSL https://raw.githubusercontent.com/<GITHUB_USER>/lingma-app-timeout-pa
 最简单的做法是把仓库公开到 GitHub，然后把脚本 raw 地址发给同事。默认不传命令就是 `install`：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<GITHUB_USER>/lingma-app-timeout-patch/main/lingma-patch.sh | bash
+curl -fsSL https://raw.githubusercontent.com/wilsonyiyi/lingma-app-timeout-patch/main/lingma-patch.sh | bash
 ```
 
 脚本会按平台自动推断 Lingma 默认安装路径；如果推断不到，再让同事补 `--file`。
