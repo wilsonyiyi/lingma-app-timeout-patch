@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_VERSION="1.1.1"
+SCRIPT_VERSION="1.2.0"
 PATCH_MARKER="[LingmaAutoResumePatch]"
 BACKUP_SUFFIX=".lingma-auto-resume.backup"
 META_SUFFIX=".lingma-auto-resume.meta.json"
@@ -9,10 +9,10 @@ META_SUFFIX=".lingma-auto-resume.meta.json"
 usage() {
   cat <<'EOF'
 Usage:
-  install-lingma-auto-resume.sh [install] [--file <path>] [--force]
-  install-lingma-auto-resume.sh restore [--file <path>] [--force]
-  install-lingma-auto-resume.sh status  [--file <path>]
-  install-lingma-auto-resume.sh help
+  lingma-patch.sh [install] [--file <path>] [--force]
+  lingma-patch.sh restore [--file <path>] [--force]
+  lingma-patch.sh status  [--file <path>]
+  lingma-patch.sh help
 
 Commands:
   install   Back up the target bundle and install the auto-resume patch. This is the default command.
@@ -100,6 +100,60 @@ bundle_meta_path() {
   printf '%s%s\n' "$1" "$META_SUFFIX"
 }
 
+archive_path_with_timestamp() {
+  printf '%s.%s\n' "$1" "$2"
+}
+
+archive_timestamp() {
+  node <<'NODE'
+const timestamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+process.stdout.write(timestamp);
+NODE
+}
+
+extract_status_field() {
+  local status_json="$1"
+  local field_name="$2"
+
+  STATUS_JSON="$status_json" FIELD_NAME="$field_name" node <<'NODE'
+const status = JSON.parse(process.env.STATUS_JSON);
+const fieldName = process.env.FIELD_NAME;
+const value = status[fieldName];
+
+if (value === undefined || value === null) {
+  process.stdout.write('');
+} else if (typeof value === 'string') {
+  process.stdout.write(value);
+} else {
+  process.stdout.write(JSON.stringify(value));
+}
+NODE
+}
+
+rotate_active_generation() {
+  local backup_file="$1"
+  local meta_file="$2"
+
+  [[ -f "$backup_file" || -f "$meta_file" ]] || return 0
+
+  local timestamp
+  timestamp="$(archive_timestamp)"
+
+  if [[ -f "$backup_file" ]]; then
+    local archived_backup
+    archived_backup="$(archive_path_with_timestamp "$backup_file" "$timestamp")"
+    mv "$backup_file" "$archived_backup"
+    log "Archived backup: $archived_backup"
+  fi
+
+  if [[ -f "$meta_file" ]]; then
+    local archived_meta
+    archived_meta="$(archive_path_with_timestamp "$meta_file" "$timestamp")"
+    mv "$meta_file" "$archived_meta"
+    log "Archived metadata: $archived_meta"
+  fi
+}
+
 node_status() {
   local target_file="$1"
   local backup_file="$2"
@@ -130,6 +184,7 @@ function readIfExists(file) {
 const content = readIfExists(targetFile);
 const backupContent = readIfExists(backupFile);
 const metaExists = fs.existsSync(metaFile);
+let meta = null;
 
 const status = {
   targetFile,
@@ -150,13 +205,80 @@ if (backupContent !== null) {
 
 if (metaExists) {
   try {
-    status.meta = JSON.parse(fs.readFileSync(metaFile, 'utf8'));
+    meta = JSON.parse(fs.readFileSync(metaFile, 'utf8'));
+    status.meta = meta;
   } catch (error) {
     status.metaReadError = String(error && error.message ? error.message : error);
   }
 }
 
+const targetSha256 = status.targetSha256 || null;
+const backupSha256 = status.backupSha256 || null;
+const metaSourceSha256 = meta && typeof meta.sourceSha256 === 'string' ? meta.sourceSha256 : null;
+const metaPatchedSha256 = meta && typeof meta.patchedSha256 === 'string' ? meta.patchedSha256 : null;
+
+status.metaValid = meta !== null;
+status.backupMatchesMeta = Boolean(backupSha256 && metaSourceSha256 && backupSha256 === metaSourceSha256);
+status.targetMatchesPatchedMeta = Boolean(targetSha256 && metaPatchedSha256 && targetSha256 === metaPatchedSha256);
+status.targetMatchesSourceMeta = Boolean(targetSha256 && metaSourceSha256 && targetSha256 === metaSourceSha256);
+
+if (!status.targetExists) {
+  status.state = 'missing-target';
+} else if (status.patched) {
+  status.state = status.metaValid && status.backupExists && status.backupMatchesMeta && status.targetMatchesPatchedMeta
+    ? 'patched-current'
+    : 'patched-stale';
+} else if (status.metaValid) {
+  status.state = status.backupExists && status.backupMatchesMeta && status.targetMatchesSourceMeta
+    ? 'clean'
+    : 'drifted';
+} else if (status.backupExists) {
+  status.state = targetSha256 && backupSha256 && targetSha256 === backupSha256 ? 'clean' : 'drifted';
+} else {
+  status.state = 'clean';
+}
+
 process.stdout.write(JSON.stringify(status, null, 2));
+NODE
+}
+
+write_source_generation() {
+  local target_file="$1"
+  local output_file="$2"
+
+  TARGET_FILE="$target_file" \
+  OUTPUT_FILE="$output_file" \
+  PATCH_MARKER="$PATCH_MARKER" \
+  node <<'NODE'
+const fs = require('fs');
+
+const targetFile = process.env.TARGET_FILE;
+const outputFile = process.env.OUTPUT_FILE;
+const marker = process.env.PATCH_MARKER;
+
+const originalSnippet = 'const c=(0,GF.useCallback)(()=>{l(!0);const d=t.permissionRequest;if(!d){r.warn("[ResumeTool] No permission request found");return}const g=d.options?.[0];if(!g){r.warn("[ResumeTool] No allow option found");return}r.trace("[ResumeTool] Resuming task with option:",g),e.get("IACPClientService").resolvePermissionRequest(t.toolCallId,g),e.get("IChatSessionService").resumeSession(t.permissionRequest?.sessionId||t.sessionId,t.permissionRequest),r.info("[ResumeTool] Session resumed")},[t,e]),u=(0,GF.useMemo)(()=>[mt.FINISHED,mt.ERROR,mt.CANCELLED].includes(t.toolCallStatus),[t.toolCallStatus]);';
+const patchedPattern = /const f=\(0,GF\.useRef\)\(!1\),c=\(0,GF\.useCallback\)\(\(\)=>\{const d=t\.permissionRequest;if\(!d\)\{r\.warn\("\[ResumeTool\] No permission request found"\);return\}const g=d\.options\?\.\[0\];if\(!g\)\{r\.warn\("\[ResumeTool\] No allow option found"\);return\}r\.trace\("\[ResumeTool\] Resuming task with option:",g\),e\.get\("IACPClientService"\)\.resolvePermissionRequest\(t\.toolCallId,g\),e\.get\("IChatSessionService"\)\.resumeSession\(t\.permissionRequest\?\.sessionId\|\|t\.sessionId,t\.permissionRequest\),l\(!0\),r\.info\("\[ResumeTool\] Session resumed"\),r\.info\("\[LingmaAutoResumePatch\] v[^"]+ auto-resume dispatched and footer hidden"\)\},\[t,e\]\);\(0,GF\.useEffect\)\(\(\)=>\{if\(f\.current\|\|t\.parameters\?\.reasonForCode!==80408\|\|!t\.permissionRequest\|\|\[mt\.FINISHED,mt\.ERROR,mt\.CANCELLED\]\.includes\(t\.toolCallStatus\)\)return;f\.current=!0,Promise\.resolve\(\)\.then\(\(\)=>c\(\)\)\},\[t\.parameters\?\.reasonForCode,t\.permissionRequest,t\.toolCallStatus,c\]\);const u=\(0,GF\.useMemo\)\(\(\)=>\[mt\.FINISHED,mt\.ERROR,mt\.CANCELLED\]\.includes\(t\.toolCallStatus\),\[t\.toolCallStatus\]\);/;
+
+const current = fs.readFileSync(targetFile, 'utf8');
+
+if (!current.includes(marker)) {
+  fs.writeFileSync(outputFile, current);
+  process.exit(0);
+}
+
+if (!patchedPattern.test(current)) {
+  process.stderr.write('Cannot reconstruct the unpatched source from the current bundle.\n');
+  process.exit(6);
+}
+
+const restored = current.replace(patchedPattern, originalSnippet);
+
+if (restored === current || restored.includes(marker)) {
+  process.stderr.write('Failed to reconstruct the unpatched source from the current bundle.\n');
+  process.exit(7);
+}
+
+fs.writeFileSync(outputFile, restored);
 NODE
 }
 
@@ -243,6 +365,7 @@ if (!target.includes(marker)) {
 const meta = {
   scriptVersion,
   patchMarker: marker,
+  state: 'patched-current',
   targetFile,
   backupFile,
   createdAt: new Date().toISOString(),
@@ -268,6 +391,7 @@ main() {
   need_cmd node
   need_cmd cp
   need_cmd mktemp
+  need_cmd mv
 
   local command=""
   if [[ $# -eq 0 ]]; then
@@ -324,23 +448,35 @@ main() {
         error "Lingma appears to be running. Quit Lingma first, or rerun with --force."
       fi
 
-      if grep -Fq "$PATCH_MARKER" "$target_file"; then
+      local initial_status
+      local initial_state
+      initial_status="$(node_status "$target_file" "$backup_file" "$meta_file")"
+      initial_state="$(extract_status_field "$initial_status" "state")"
+
+      if [[ "$initial_state" == "patched-current" ]]; then
         log "Already patched: $target_file"
-        node_status "$target_file" "$backup_file" "$meta_file"
+        printf '%s\n' "$initial_status"
         return 0
       fi
 
-      if [[ ! -f "$backup_file" ]]; then
-        cp -p "$target_file" "$backup_file"
+      if [[ "$initial_state" == "patched-stale" || "$initial_state" == "drifted" ]]; then
+        rotate_active_generation "$backup_file" "$meta_file"
       fi
 
       local tmp_file
+      local tmp_source_file
       tmp_file="$(mktemp "${TMPDIR:-/tmp}/lingma-auto-resume.XXXXXX")"
-      trap 'rm -f "$tmp_file"' EXIT
+      tmp_source_file="$(mktemp "${TMPDIR:-/tmp}/lingma-auto-resume-source.XXXXXX")"
+      trap 'rm -f "$tmp_file" "$tmp_source_file"' EXIT
+
+      write_source_generation "$target_file" "$tmp_source_file"
+      cp -p "$tmp_source_file" "$backup_file"
+      cp -p "$tmp_source_file" "$target_file"
 
       install_patch "$target_file" "$backup_file" "$meta_file" "$tmp_file"
 
       rm -f "$tmp_file"
+      rm -f "$tmp_source_file"
       trap - EXIT
 
       log "Patched successfully: $target_file"
